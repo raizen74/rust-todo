@@ -7,7 +7,9 @@ use std::io::{Read, Write};
 fn get_handle(path: Option<&str>) -> Result<File, String> {
     let path = match path {
         Some(p) => p,
-        None => &env::var("JSON_STORE_PATH").unwrap_or("./tasks.json".to_string()),
+        None => {
+            &env::var("JSON_STORE_PATH").unwrap_or("./tasks.json".to_string())
+        }
     };
     let file = OpenOptions::new()
         .read(true)
@@ -24,12 +26,14 @@ pub fn get_all<T: DeserializeOwned>() -> Result<HashMap<String, T>, String> {
     file.read_to_string(&mut contents)
         .map_err(|e| format!("Error reading file: {}", e))?;
     // Map errors to String
-    let tasks: HashMap<String, T> =
-        serde_json::from_str(&contents).map_err(|e| format!("Error parsing JSON: {}", e))?;
+    let tasks: HashMap<String, T> = serde_json::from_str(&contents)
+        .map_err(|e| format!("Error parsing JSON: {}", e))?;
     Ok(tasks)
 }
 
-pub fn save_all<T: Serialize>(tasks: &HashMap<String, T>) -> Result<(), String> {
+pub fn save_all<T: Serialize>(
+    tasks: &HashMap<String, T>,
+) -> Result<(), String> {
     let mut file = get_handle(None)?;
     let json = serde_json::to_string_pretty(tasks)
         .map_err(|e| format!("Error serializing JSON: {}", e))?;
