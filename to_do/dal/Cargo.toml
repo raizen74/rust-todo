@@ -1,0 +1,13 @@
+[package]
+name = "to-do-dal"
+version = "0.1.0"
+edition = "2024"
+# json-file feature declares that it needs both of our serde dependencies
+# if the library is compiled with the json-file feature. This gives us fine-grained control over what is
+# compiled.
+[features]
+json-file = ["serde_json", "serde"]
+
+[dependencies]
+serde_json = { version="1.0.114", optional = true }
+serde = { version="1.0.197", optional = true }
