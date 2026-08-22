@@ -1,6 +1,8 @@
+use actix_cors::Cors;
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, web};
 use rust_embed::RustEmbed;
 use std::path::Path;
+use to_do_server::api::views_factory as to_do_views_factory;
 
 async fn index() -> HttpResponse {
     HttpResponse::Ok()
@@ -49,8 +51,17 @@ async fn catch_all(req: HttpRequest) -> impl Responder {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| App::new().default_service(web::route().to(catch_all)))
-        .bind("0.0.0.0:8001")?
-        .run()
-        .await
+    HttpServer::new(|| {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header();
+        App::new()
+            .configure(to_do_views_factory)
+            .wrap(cors)
+            .default_service(web::route().to(catch_all))
+    })
+    .bind("0.0.0.0:8001")?
+    .run()
+    .await
 }
