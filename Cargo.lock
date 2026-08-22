@@ -606,6 +606,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glue"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,6 +1245,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "thiserror"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1280,6 +1309,7 @@ name = "to-do-actix-server"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "glue",
  "to-do-core",
  "tokio",
 ]
@@ -1289,6 +1319,7 @@ name = "to-do-core"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "glue",
  "serde",
  "to-do-dal",
 ]
@@ -1297,6 +1328,7 @@ dependencies = [
 name = "to-do-dal"
 version = "0.1.0"
 dependencies = [
+ "glue",
  "serde",
  "serde_json",
 ]

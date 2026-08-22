@@ -11,3 +11,4 @@ json-file = ["serde_json", "serde"]
 [dependencies]
 serde_json = { version="1.0.114", optional = true }
 serde = { version="1.0.197", optional = true }
+glue = { path = "../../glue"}
