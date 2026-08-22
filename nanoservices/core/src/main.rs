@@ -2,9 +2,9 @@ mod api;
 mod enums;
 mod structs;
 use crate::enums::TaskStatus;
-use api::basic_actions::create::create;
 use clap::Parser;
 use glue::errors::NanoServiceError;
+use crate::structs::ToDoItem;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -14,11 +14,13 @@ struct Args {
     #[arg(short, long)]
     status: String,
 }
-
 fn main() -> Result<(), NanoServiceError> {
     let args = Args::parse();
     let status_enum = TaskStatus::from_string(&args.status)?;
-    let to_do_item = create(&args.title, status_enum)?;
-    println!("{}", to_do_item);
+    let item = ToDoItem {
+            title: args.title,
+            status: status_enum,
+        };
+    println!("{}", item);
     Ok(())
 }
