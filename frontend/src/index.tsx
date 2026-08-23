@@ -1,3 +1,4 @@
+import "./App.css";
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import getAll from "./api/get";
@@ -79,5 +80,10 @@ const App = () => {
     );
   }
 };
-const root = ReactDOM.createRoot(document.getElementById("root"));
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+  throw new Error("Root element was not found");
+}
+
+const root = ReactDOM.createRoot(rootElement);
 root.render(<App />);
