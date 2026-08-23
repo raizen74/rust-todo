@@ -8,5 +8,5 @@ cd frontend
 npm install
 npm run build
 cd ../ingress
-cargo clean
+cargo clean # clean the build artifacts to embed the frontend build into the binary
 cargo run
