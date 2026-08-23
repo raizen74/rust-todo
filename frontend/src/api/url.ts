@@ -14,7 +14,7 @@ export class Url {
   static getBaseUrl(): string {
     let url = window.location.href;
     if (url.includes("localhost:3000")) {
-      return "http://0.0.0.0:8001/";
+      return "http://localhost:8001/";
     }
     return url;
   }

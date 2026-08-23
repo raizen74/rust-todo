@@ -7,5 +7,5 @@ use to_do_core::structs::ToDoItem;
 // then a bad request response is returned to the client with the serialization error message
 pub async fn create(body: Json<ToDoItem>) -> Result<HttpResponse, NanoServiceError> {
     let _ = create_core(body.into_inner()).await?;
-    Ok(HttpResponse::Ok().json(get_all_core().await?)) // load and return all the data
+    Ok(HttpResponse::Created().json(get_all_core().await?)) // load and return all the data
 }

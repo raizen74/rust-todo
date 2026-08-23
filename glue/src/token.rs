@@ -39,8 +39,8 @@ mod actix_impl {
     }
 }
 
-#[cfg(feature = "actix")]
-pub use actix_impl::ActixFromRequest;
+// #[cfg(feature = "actix")]
+// pub use actix_impl::ActixFromRequest;
 // impl<T> Future for Ready<T> {
 //     type Output = T;
 //     #[inline]
