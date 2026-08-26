@@ -6,4 +6,7 @@ members = [
     "nanoservices/to-do/core",
     "nanoservices/to-do/dal",
     "nanoservices/to-do/networking/actix_server",
+    "nanoservices/auth/core",
+    "nanoservices/auth/dal",
+    "nanoservices/auth/networking/actix_server",    
 ]

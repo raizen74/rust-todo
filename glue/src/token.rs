@@ -1,6 +1,47 @@
-#[derive(Debug)]
+use crate::errors::{NanoServiceError, NanoServiceErrorStatus};
+use dotenv::dotenv;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HeaderToken {
-    pub message: String,
+    pub unique_id: String,
+}
+
+impl HeaderToken {
+    pub fn get_key() -> Result<String, NanoServiceError> {
+        dotenv().ok();
+        std::env::var("JWT_SECRET")
+            .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::Unauthorized))
+    }
+    
+    pub fn encode(self) -> Result<String, NanoServiceError> {
+        let key_str = Self::get_key()?;
+        let key = EncodingKey::from_secret(key_str.as_ref());
+        return match encode(&Header::default(), &self, &key) {
+            Ok(token) => Ok(token),
+            Err(error) => Err(NanoServiceError::new(
+                error.to_string(),
+                NanoServiceErrorStatus::Unauthorized,
+            )),
+        };
+    }
+    
+    pub fn decode(token: &str) -> Result<Self, NanoServiceError> {
+        let key_str = Self::get_key()?;
+        let key = DecodingKey::from_secret(key_str.as_ref());
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.required_spec_claims.remove("exp");
+        match decode::<Self>(token, &key, &validation) {
+            Ok(token_data) => return Ok(token_data.claims),
+            Err(error) => {
+                return Err(NanoServiceError::new(
+                    error.to_string(),
+                    NanoServiceErrorStatus::Unauthorized,
+                ));
+            }
+        };
+    }
 }
 
 #[cfg(feature = "actix")]
@@ -17,7 +58,7 @@ mod actix_impl {
         // from_request function returns a Future that is going to be by tokio
         fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
             let raw_data = match req.headers().get("token") {
-                Some(data) => data,
+                Some(data) => data.to_str().expect("convert token to str"),
                 None => {
                     // Lowercase err and lowercase ok just wrap the error or result in a Ready struct
                     return err(NanoServiceError {
@@ -26,8 +67,8 @@ mod actix_impl {
                     });
                 }
             };
-            let message = match raw_data.to_str() {
-                Ok(token) => token.to_string(),
+            let token = match HeaderToken::decode(raw_data) {
+                Ok(token) => token,
                 Err(_) => {
                     return err(NanoServiceError {
                         status: NanoServiceErrorStatus::Unauthorized,
@@ -35,7 +76,7 @@ mod actix_impl {
                     });
                 }
             };
-            ok(HeaderToken { message }) // lowercase ok just wraps the result in a Ready struct
+            ok(token) // lowercase ok just wraps the result in a Ready struct
         }
     }
 }
