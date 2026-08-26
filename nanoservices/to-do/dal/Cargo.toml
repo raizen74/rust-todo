@@ -11,7 +11,7 @@ sqlx-postgres = ["sqlx"]
 
 [dependencies]
 serde ={ version="1.0.197", features = ["derive"] }
-glue = { path = "../../glue"}
+glue = { path = "../../../glue"}
 # for json-file
 serde_json ={ version="1.0.114", optional = true }
 

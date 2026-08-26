@@ -9,5 +9,5 @@ rust-embed = "8.3.0"
 mime_guess = "2.0.4"
 actix-web = "4.5.1"
 actix-cors = "0.7.0"
-to_do_server = { path = "../nanoservices/networking/actix_server", package = "to-do-actix-server" }
-to-do-dal = { path = "../nanoservices/dal", features = ["sqlx-postgres"] }
+to_do_server = { path = "../nanoservices/to-do/networking/actix_server", package = "to-do-actix-server" }
+to-do-dal = { path = "../nanoservices/to-do/dal", features = ["sqlx-postgres"] }

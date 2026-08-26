@@ -1,6 +1,14 @@
 {
-  "writing": {
-    "title": "writing",
+  "L'aleix al parc": {
+    "title": "L'aleix al parc",
     "status": "DONE"
+  },
+  "Jeronimo": {
+    "title": "Jeronimo",
+    "status": "PENDING"
+  },
+  "La marta ballell": {
+    "title": "La marta ballell",
+    "status": "PENDING"
   }
 }
