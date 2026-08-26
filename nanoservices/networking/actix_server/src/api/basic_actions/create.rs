@@ -1,11 +1,15 @@
 use actix_web::{HttpResponse, web::Json};
 use glue::errors::NanoServiceError;
+use glue::token::HeaderToken;
 use to_do_core::api::basic_actions::{create::create as create_core, get::get_all as get_all_core};
-use to_do_core::structs::ToDoItem;
+use to_do_dal::to_do_items::schema::NewToDoItem;
+use to_do_dal::to_do_items::transactions::{create::SaveOne, get::GetAll};
 
-// If a ToDoItem struct cannot be constructed from the JSON body of the HTTP request, 
-// then a bad request response is returned to the client with the serialization error message
-pub async fn create(body: Json<ToDoItem>) -> Result<HttpResponse, NanoServiceError> {
-    let _ = create_core(body.into_inner()).await?;
-    Ok(HttpResponse::Created().json(get_all_core().await?)) // load and return all the data
+pub async fn create<T: SaveOne + GetAll>(
+    token: HeaderToken,
+    body: Json<NewToDoItem>,
+) -> Result<HttpResponse, NanoServiceError> {
+    print!("Token: {:?}", token);
+    let _ = create_core::<T>(body.into_inner()).await?;
+    Ok(HttpResponse::Created().json(get_all_core::<T>().await?))
 }

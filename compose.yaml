@@ -1,0 +1,11 @@
+services:
+  db:
+    image: postgres:latest
+    container_name: pg-dev
+    restart: always
+    environment:
+      POSTGRES_USER: username
+      POSTGRES_DB: to_do
+      POSTGRES_PASSWORD: mysecretpassword
+    ports:
+      - "5432:5432"

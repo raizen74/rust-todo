@@ -6,9 +6,14 @@ edition = "2024"
 # if the library is compiled with the json-file feature. This gives us fine-grained control over what is
 # compiled.
 [features]
-json-file = ["serde_json", "serde"]
+json-file = ["serde_json"]
+sqlx-postgres = ["sqlx"]
 
 [dependencies]
-serde_json = { version="1.0.114", optional = true }
-serde = { version="1.0.197", optional = true }
+serde ={ version="1.0.197", features = ["derive"] }
 glue = { path = "../../glue"}
+# for json-file
+serde_json ={ version="1.0.114", optional = true }
+
+# for sqlx-postgres
+sqlx = { version = "0.8.3", features = ["runtime-tokio-rustls", "tls-rustls", "migrate", "postgres", "json"], optional = true }
