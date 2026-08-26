@@ -76,6 +76,7 @@ mod actix_impl {
                     });
                 }
             };
+            println!("Token decoded: {:?}", token);
             ok(token) // lowercase ok just wraps the result in a Ready struct
         }
     }
