@@ -6,7 +6,7 @@ import { TaskStatus } from "../interfaces/toDoItems";
 interface ToDoItemProps {
   title: string;
   status: string;
-  id: string;
+  id: number;
   passBackResponse: (response: any) => void;
 }
 
@@ -16,6 +16,7 @@ export const ToDoItem: React.FC<ToDoItemProps> = ({
   id,
   passBackResponse,
 }) => {
+  console.log(title, status, id);
   const [itemTitle, setTitle] = useState<string>(title);
   const [button, setButton] = useState<string>("");
   
@@ -26,9 +27,9 @@ export const ToDoItem: React.FC<ToDoItemProps> = ({
     setButton(processStatus(status));
   }, [status]);
   
-  const editOrDelete = async () => {
+  const doneOrDelete = async () => {
     if (button === "done") {
-      await updateToDoItemCall(itemTitle, TaskStatus.DONE).then((response) => {
+      await updateToDoItemCall(itemTitle, TaskStatus.DONE, id).then((response) => {
         passBackResponse(response);
       });
     } else {
@@ -39,9 +40,9 @@ export const ToDoItem: React.FC<ToDoItemProps> = ({
   };
   
   return (
-    <div className="itemContainer" id={id}>
+    <div className="itemContainer" id={`${id}`}>
       <p>{itemTitle}</p>
-      <button className="actionButton" onClick={editOrDelete}>
+      <button className="actionButton" onClick={doneOrDelete}>
         {button}
       </button>
     </div>

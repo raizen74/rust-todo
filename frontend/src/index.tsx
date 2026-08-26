@@ -54,7 +54,7 @@ const App = () => {
                   key={item.title + item.status}
                   title={item.title}
                   status={item.status}
-                  id={item.title}
+                  id={item.id}
                   passBackResponse={reRenderItems}
                 />
               </>
@@ -68,7 +68,7 @@ const App = () => {
                   key={item.title + item.status}
                   title={item.title}
                   status={item.status}
-                  id={item.title}
+                  id={item.id}
                   passBackResponse={reRenderItems}
                 />
               </>

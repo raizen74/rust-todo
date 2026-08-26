@@ -27,6 +27,7 @@ impl GetAll for SqlxPostGresDescriptor {
 
 #[cfg(feature = "json-file")]
 impl GetAll for JsonFileDescriptor {
+    // Returns a Future that will be awaited by the tokio runtime
     fn get_all() -> impl Future<Output = Result<Vec<ToDoItem>, NanoServiceError>> + Send {
         json_file_get_all()
     }
