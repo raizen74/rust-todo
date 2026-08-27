@@ -1,4 +1,5 @@
 use actix_web::{HttpRequest, HttpResponse};
+use auth_kernel::api::users::get::get_user_by_unique_id;
 use glue::errors::{NanoServiceError, NanoServiceErrorStatus};
 use glue::token::HeaderToken;
 use to_do_core::api::basic_actions::{delete::delete as delete_core, get::get_all as get_all_core};
@@ -8,9 +9,10 @@ pub async fn delete_by_name<T: DeleteOne + GetAll>(
     token: HeaderToken,
     req: HttpRequest,
 ) -> Result<HttpResponse, NanoServiceError> {
+    let user = get_user_by_unique_id(token.unique_id).await?;
     match req.match_info().get("name") {
         Some(name) => {
-            delete_core::<T>(&token, name).await?;
+            delete_core::<T>(name, user.id).await?;
         }
         None => {
             return Err(NanoServiceError::new(
@@ -19,5 +21,5 @@ pub async fn delete_by_name<T: DeleteOne + GetAll>(
             ));
         }
     };
-    Ok(HttpResponse::Ok().json(get_all_core::<T>(&token).await?))
+    Ok(HttpResponse::Ok().json(get_all_core::<T>(user.id).await?))
 }

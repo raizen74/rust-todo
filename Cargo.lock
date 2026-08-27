@@ -2809,6 +2809,7 @@ version = "0.1.0"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "auth-kernel",
  "glue",
  "to-do-core",
  "to-do-dal",
