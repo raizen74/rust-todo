@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.36.0", features = ["full"] }
 actix-web = "4.9.0"
+actix-cors = "0.7.0"
 to-do-core = { path = "../../core" }
 to-do-dal = { path = "../../dal", features = ["sqlx-postgres"] }
 glue = { path = "../../../../glue", features = ["actix"] }
