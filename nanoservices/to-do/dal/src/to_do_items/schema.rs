@@ -1,7 +1,6 @@
-// file: nanoservices/to_do/dal/src/to_do_items/schema.rs
-use std::fmt;
-use serde::{Serialize, Deserialize};
 use super::enums::TaskStatus;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NewToDoItem {
@@ -45,4 +44,11 @@ impl AllToDoItems {
         }
         AllToDoItems { pending, done }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "sqlx-postgres", derive(sqlx::FromRow))]
+pub struct UserConnection {
+    pub user_id: i32,
+    pub to_do_id: i32,
 }

@@ -14,31 +14,36 @@ use glue::errors::NanoServiceErrorStatus;
 use std::collections::HashMap;
 use std::future::Future;
 
+pub type GetAllResponse = Result<Vec<ToDoItem>, NanoServiceError>;
+
 pub trait GetAll {
-    fn get_all() -> impl Future<Output = Result<Vec<ToDoItem>, NanoServiceError>> + Send;
+    fn get_all(user_id: i32) -> impl Future<Output = GetAllResponse> + Send;
 }
 
 #[cfg(feature = "sqlx-postgres")]
 impl GetAll for SqlxPostGresDescriptor {
-    fn get_all() -> impl Future<Output = Result<Vec<ToDoItem>, NanoServiceError>> + Send {
-        sqlx_postgres_get_all()
+    fn get_all(user_id: i32) -> impl Future<Output = GetAllResponse> + Send {
+        sqlx_postgres_get_all(user_id)
     }
 }
 
 #[cfg(feature = "json-file")]
 impl GetAll for JsonFileDescriptor {
-    // Returns a Future that will be awaited by the tokio runtime
-    fn get_all() -> impl Future<Output = Result<Vec<ToDoItem>, NanoServiceError>> + Send {
-        json_file_get_all()
+    fn get_all(user_id: i32) -> impl Future<Output = GetAllResponse> + Send {
+        json_file_get_all(user_id)
     }
 }
 
 #[cfg(feature = "sqlx-postgres")]
-async fn sqlx_postgres_get_all() -> Result<Vec<ToDoItem>, NanoServiceError> {
+async fn sqlx_postgres_get_all(user_id: i32) -> GetAllResponse {
     let items = sqlx::query_as::<_, ToDoItem>(
         "
-SELECT * FROM to_do_items",
+SELECT * FROM to_do_items WHERE id IN (
+SELECT to_do_id
+FROM user_connections WHERE user_id = $1
+)",
     )
+    .bind(user_id)
     .fetch_all(&*SQLX_POSTGRES_POOL)
     .await
     .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::Unknown))?;
@@ -46,8 +51,15 @@ SELECT * FROM to_do_items",
 }
 
 #[cfg(feature = "json-file")]
-async fn json_file_get_all() -> Result<Vec<ToDoItem>, NanoServiceError> {
+async fn json_file_get_all(user_id: i32) -> GetAllResponse {
     let tasks = get_all::<ToDoItem>().unwrap_or_else(|_| HashMap::new());
-    let items = tasks.values().cloned().collect();
-    Ok(items)
+    let mut filtered_items: Vec<ToDoItem> = Vec::new();
+    for item in tasks.keys() {
+        let key = item.split(":").nth(1).unwrap();
+        let item_user_id = key.parse::<i32>().unwrap();
+        if item_user_id == user_id {
+            filtered_items.push(tasks.get(item).unwrap().clone());
+        }
+    }
+    Ok(filtered_items)
 }
