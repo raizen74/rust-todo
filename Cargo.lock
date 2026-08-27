@@ -353,6 +353,7 @@ version = "0.1.0"
 dependencies = [
  "auth-core",
  "auth-dal",
+ "dotenv",
  "glue",
  "reqwest",
 ]

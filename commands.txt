@@ -1,35 +1,42 @@
 docker exec -it pg-dev psql -U username -d to_do -c "\dt" # list tables
 docker exec -it pg-dev psql -U username -d to_do -c "SELECT * FROM to_do_items;"
 docker exec -it pg-dev psql -U username -d to_do -c "SELECT * FROM users;"
+cargo run -p ingress
 
-curl localhost:8001/api/v1/get/all
+-------------------------------- AUTH ------------------------------------
+Create user:
+curl -X POST http://0.0.0.0:8001/api/v1/users/create -H "Content-Type: application/json" -d '{ "email": "test@gmail.com", "password": "password" }'
+
+Login, returns JWT:
+curl -u test@gmail.com:password -X GET http://0.0.0.0:8001/api/v1/auth/login
+
+curl localhost:8001/api/v1/get/all \        
+-H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
 
 curl -X POST localhost:8001/api/v1/create \
 -H "Content-Type: application/json" \
 -H "token: jwt" \
 -d '{"title": "foo", "status": "PENDING"}'
 
-curl -X DELETE localhost:8001/api/v1/delete/washing
+curl -X DELETE localhost:8001/api/v1/delete/bar \
+-H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
 
 curl -X PATCH localhost:8001/api/v1/update \
 -H "Content-Type: application/json" \
 -H "token: jwt" \
 -d '{"id": 2, "title": "bar", "status": "PENDING"}'
 
--------------------------------- AUTH ------------------------------------
-
-curl -X POST http://0.0.0.0:8001/api/v1/users/create \                          
--H "Content-Type: application/json" \
--d '{ "email": "test@gmail.com", "password": "password" }'
-
-curl -u test@gmail.com:password -X GET http://0.0.0.0:8001/api/v1/auth/login
-
-curl localhost:8001/api/v1/get/all \        
--H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
-
-curl -X DELETE localhost:8001/api/v1/delete/bar \
--H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
-
 Get user by id:
 curl -v localhost:8081/api/v1/users/get \
 -H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
+
+-------------------------------------------------------------------------------
+to-do-server communicates with auth-server via HTTP:
+cargo run -p auth-actix-server # run auth server, listens on port 8081
+cargo run -p to-do-actix-server --no-default-features --features auth-http # run to-do server, listens on 8001
+
+Get the token: curl -u test@gmail.com:password -X GET localhost:8081/api/v1/auth/login
+curl -X POST http://127.0.0.1:8001/api/v1/create \
+    -H "Content-Type: application/json" \
+    -H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU" \
+    -d '{ "title": "code", "status": "PENDING" }'

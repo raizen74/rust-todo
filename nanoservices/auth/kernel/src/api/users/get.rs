@@ -14,6 +14,7 @@ mod reqwest_imports {
     pub use glue::errors::NanoServiceErrorStatus;
     pub use glue::token::HeaderToken;
     pub use reqwest::Client;
+    pub use dotenv::dotenv;
 }
 // core-postgres feature enables both core-postgres and auth-core blocks
 #[cfg(any(feature = "core-postgres", feature = "http"))]
@@ -35,6 +36,7 @@ pub async fn get_user_by_unique_id(id: String) -> Result<TrimmedUser, NanoServic
 
 #[cfg(feature = "http")]
 async fn get_user_by_unique_id_api_call(id: String) -> Result<TrimmedUser, NanoServiceError> {
+    dotenv().ok();
     let url = std::env::var("AUTH_API_URL")
         .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::BadRequest))?;
     let full_url = format!("{}/api/v1/users/get", url);
