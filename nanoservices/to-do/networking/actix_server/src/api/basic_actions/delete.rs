@@ -10,7 +10,7 @@ pub async fn delete_by_name<T: DeleteOne + GetAll>(
 ) -> Result<HttpResponse, NanoServiceError> {
     match req.match_info().get("name") {
         Some(name) => {
-            delete_core::<T>(token, name).await?;
+            delete_core::<T>(&token, name).await?;
         }
         None => {
             return Err(NanoServiceError::new(
@@ -19,5 +19,5 @@ pub async fn delete_by_name<T: DeleteOne + GetAll>(
             ));
         }
     };
-    Ok(HttpResponse::Ok().json(get_all_core::<T>().await?))
+    Ok(HttpResponse::Ok().json(get_all_core::<T>(&token).await?))
 }

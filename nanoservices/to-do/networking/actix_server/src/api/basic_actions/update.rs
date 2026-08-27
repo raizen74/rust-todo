@@ -9,6 +9,6 @@ pub async fn update<T: UpdateOne + GetAll>(
     token: HeaderToken,
     body: Json<ToDoItem>,
 ) -> Result<HttpResponse, NanoServiceError> {
-    let _ = update_core::<T>(token, body.into_inner()).await?;
-    Ok(HttpResponse::Ok().json(get_all_core::<T>().await?))
+    let _ = update_core::<T>(&token, body.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(get_all_core::<T>(&token).await?))
 }
