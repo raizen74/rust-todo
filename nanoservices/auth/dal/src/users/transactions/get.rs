@@ -31,3 +31,31 @@ SELECT * FROM users WHERE email = $1",
         Some(item) => Ok(item),
     }
 }
+
+pub trait GetByUniqueId {
+    fn get_by_unique_id(id: String) -> impl Future<Output = Result<User, NanoServiceError>> + Send;
+}
+
+impl GetByUniqueId for SqlxPostGresDescriptor {
+    fn get_by_unique_id(id: String) -> impl Future<Output = Result<User, NanoServiceError>> + Send {
+        sqlx_postgres_get_by_unique_id(id)
+    }
+}
+
+async fn sqlx_postgres_get_by_unique_id(id: String) -> Result<User, NanoServiceError> {
+    let item = sqlx::query_as::<_, User>(
+        "
+SELECT * FROM users WHERE unique_id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&*SQLX_POSTGRES_POOL)
+    .await
+    .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::Unknown))?;
+    match item {
+        None => Err(NanoServiceError::new(
+            "User not found".to_string(),
+            NanoServiceErrorStatus::NotFound,
+        )),
+        Some(item) => Ok(item),
+    }
+}
