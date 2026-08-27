@@ -1,7 +1,6 @@
-docker exec -it pg-dev psql -U username -d to_do -c "\dt"
+docker exec -it pg-dev psql -U username -d to_do -c "\dt" # list tables
 docker exec -it pg-dev psql -U username -d to_do -c "SELECT * FROM to_do_items;"
-
-TO_DO_DB_URL='postgresql://username:mysecretpassword@localhost:5432/to_do' cargo run -p to-do-actix-server
+docker exec -it pg-dev psql -U username -d to_do -c "SELECT * FROM users;"
 
 curl localhost:8001/api/v1/get/all
 
@@ -16,3 +15,17 @@ curl -X PATCH localhost:8001/api/v1/update \
 -H "Content-Type: application/json" \
 -H "token: jwt" \
 -d '{"id": 2, "title": "bar", "status": "PENDING"}'
+
+-------------------------------- AUTH ------------------------------------
+
+curl -X POST http://0.0.0.0:8001/api/v1/users/create \                          
+-H "Content-Type: application/json" \
+-d '{ "email": "test@gmail.com", "password": "password" }'
+
+curl -u test@gmail.com:password -X GET http://0.0.0.0:8001/api/v1/auth/login
+
+curl localhost:8001/api/v1/get/all \        
+-H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"
+
+curl -X DELETE localhost:8001/api/v1/delete/bar \
+-H "token: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1bmlxdWVfaWQiOiJjNzMwODRlNy1iMTNlLTQwMzgtYTU3MC1lMDMyNmRjODRiNGEifQ.Cbju9ZYwdLZr3mkI3IHHKd_DbJmi3-UVftW9xPAQTrU"

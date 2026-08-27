@@ -30,7 +30,10 @@ async function handleRequest<T, X>(
 
 export async function getCall<X>(url: string, expectedResponse: number) {
   let response = axios.get<X | string>(url, {
-    headers: { "Content-Type": "application/json", token: "jwt" },
+    headers: {
+      "Content-Type": "application/json",
+      token: localStorage.getItem("token"),
+    },
     validateStatus: () => true,
   });
   return handleRequest(response, expectedResponse);
@@ -40,7 +43,7 @@ export async function deleteCall<X>(url: string, expectedResponse: number) {
   let response = axios.delete<X | string>(url, {
     headers: {
       "Content-Type": "application/json",
-      token: "jwt",
+      token: localStorage.getItem("token"),
     },
     validateStatus: () => true,
   });
@@ -55,7 +58,7 @@ export async function postCall<T, X>(
   let response = axios.post<X | string>(url, body, {
     headers: {
       "Content-Type": "application/json",
-      token: "jwt",
+      token: localStorage.getItem("token"),
     },
     validateStatus: () => true, // ensures that we resolve the promise for all response statuses
   });
@@ -70,7 +73,7 @@ export async function putCall<T, X>(
   let response = axios.put<X | string>(url, body, {
     headers: {
       "Content-Type": "application/json",
-      token: "jwt",
+      token: localStorage.getItem("token"),
     },
     validateStatus: () => true,
   });
@@ -85,7 +88,7 @@ export async function patchCall<T, X>(
   let response = axios.patch<X | string>(url, body, {
     headers: {
       "Content-Type": "application/json",
-      token: "jwt",
+      token: localStorage.getItem("token"),
     },
     validateStatus: () => true,
   });

@@ -5,10 +5,18 @@ import getAll from "./api/get";
 import { ToDoItems } from "./interfaces/toDoItems";
 import { CreateToDoItem } from "./components/createItemForm";
 import { ToDoItem } from "./components/toDoItem";
+import { LoginForm } from "./components/loginForm";
 
 const App = () => {
   const [data, setData] = useState<string | ToDoItems | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loggedin, setLoggedin] = useState<boolean>(
+    localStorage.getItem("token") !== null,
+  );
+  function setToken(token: string) {
+    localStorage.setItem("token", token);
+    setLoggedin(true);
+  }
   React.useEffect(() => {
     const fetchData = async () => {
       const response = await getAll();
@@ -18,8 +26,10 @@ const App = () => {
         setData(response.data);
       }
     };
-    fetchData();
-  }, []); // fires once the App component has been loaded
+    if (loggedin) {
+      fetchData();
+    }
+  }, [loggedin]); // fires once the App component has been loaded
 
   function reRenderItems(response: any) {
     console.log("reRenderItems called with response:", response);
@@ -32,6 +42,10 @@ const App = () => {
     } else {
       setError("Unknown error");
     }
+  }
+
+  if (localStorage.getItem("token") === null) {
+    return <LoginForm setToken={setToken} />;
   }
 
   if (error) {
