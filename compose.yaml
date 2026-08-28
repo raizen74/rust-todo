@@ -9,3 +9,9 @@ services:
       POSTGRES_PASSWORD: mysecretpassword
     ports:
       - "5432:5432"
+  cache:
+    container_name: 'to-do-redis'
+    build: './nanoservices/user-session-cache/cache-module'
+    restart: always
+    ports:
+      - '6379:6379'

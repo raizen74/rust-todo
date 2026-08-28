@@ -1,0 +1,1 @@
+The purpose of this client is to provide the `login` function to the auth and to-do actix servers and the `update` function to the to-do actix server.

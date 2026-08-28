@@ -10,3 +10,7 @@ base64 = "0.22.1"
 auth-core = { path = "../../core" }
 auth-dal = { path = "../../dal" }
 glue = { path = "../../../../glue", features = ["actix"] }
+# kernel feature must be the same as the to-do-actix-server
+# when compiling both servers into ingress to avoid conflicts.
+# For independent actix-server deployments the kernel feature can be different.
+auth-kernel = { path = "../../kernel", features = ["core-postgres"] }

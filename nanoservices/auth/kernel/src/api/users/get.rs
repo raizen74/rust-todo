@@ -38,7 +38,8 @@ pub async fn get_user_by_unique_id(id: String) -> Result<TrimmedUser, NanoServic
 async fn get_user_by_unique_id_api_call(id: String) -> Result<TrimmedUser, NanoServiceError> {
     dotenv().ok();
     let url = std::env::var("AUTH_API_URL")
-        .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::BadRequest))?;
+    .map_err(|e| NanoServiceError::new(e.to_string(), NanoServiceErrorStatus::BadRequest))?;
+    println!("get_user_by_unique_id API call: {}", url);
     let full_url = format!("{}/api/v1/users/get", url);
     let header_token = HeaderToken { unique_id: id }.encode()?;
     let client = Client::new();
