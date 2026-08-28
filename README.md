@@ -19,6 +19,9 @@ Full stack to-do application with a modular design implementing Rust workspaces 
 |   |   |-- dal/                       # User schemas, persistence, migrations
 |   |   |-- kernel/                    # Auth boundary: in-process or HTTP
 |   |   `-- networking/actix_server/   # Standalone auth HTTP server
+|   |-- user-session-cache/
+|   |   |-- cache-module/              # Rust Redis dynamic library
+|   |   `-- cache-client/              # Redis client used by application crates
 |   `-- to-do/
 |       |-- core/                      # To-do use cases
 |       |-- dal/                       # To-do schemas and storage adapters
@@ -69,6 +72,30 @@ The `glue` crate contains functionality shared across the nanoservices. It keeps
 - The `safe_eject!` macro converts lower-level errors into `NanoServiceError` values with an appropriate status and optional context.
 
 The nanoservice crates depend on these shared contracts rather than defining incompatible error or token handling for each service. The `glue` crate is also used by the auth kernel, so both its direct database path and its HTTP path return the same error and user-facing types.
+
+## User Session Cache
+
+The `nanoservices/user-session-cache` workspace adds Redis-backed sessions to the application. It contains two complementary crates:
+
+### `cache-module`
+
+`cache-module` is a Rust dynamic library compiled as a `cdylib`. Its Dockerfile builds `libcache_module.so`, copies it into a Redis image, and starts Redis with the library loaded through `--loadmodule`. The `cache` service in `compose.yaml` builds this image and exposes Redis on port `6379`.
+
+Because the module runs inside Redis, its commands operate directly on Redis data structures through the Redis Modules API instead of implementing session logic as an external polling service. It registers these custom commands:
+
+| Command | Behavior |
+| --- | --- |
+| `login.set <unique_id> <timeout_mins> <user_id>` | Creates or resets the `user_session_<unique_id>` hash, records the last interaction time, resets the request counter, and stores the permanent database user ID. |
+| `update.set <unique_id>` | Checks that the session exists, expires it when its timeout is exceeded, increments the interaction counter, refreshes the last-interaction timestamp, and returns the stored permanent user ID when valid. |
+| `logout.set <unique_id>` | Deletes the user's session hash. |
+
+Each session is represented by a Redis hash keyed as `user_session_<unique_id>`. The hash stores `last_interacted`, `timeout_mins`, `counter`, and `perm_user_id`. A session returns `TIMEOUT` after its configured inactivity period and returns `REFRESH` after more than 20 interactions, allowing the application layer to renew it.
+
+### `cache-client`
+
+`cache-client` is the asynchronous Rust client used by the application workspaces to communicate with Redis. It connects using `CACHE_API_URL` and exposes Rust functions for `login`, `logout`, and `update`, translating Redis responses such as `NOT_FOUND`, `TIMEOUT`, and `REFRESH` into `NanoServiceError` or `UserSessionStatus` values.
+
+The client is compiled into `auth-kernel`, which gives the auth and to-do networking layers a typed Rust boundary instead of requiring them to know Redis command syntax. The cache module owns the data-structure operations; the cache client owns the application-to-Redis connection and response mapping.
 
 ## Layered Architecture
 
@@ -194,15 +221,16 @@ The to-do server listens on `127.0.0.1:8001`. Its protected endpoints accept the
 Every to-do handler follows the same authorization flow:
 
 1. Extract the token and its `unique_id`.
-2. Call `auth_kernel::api::users::get::get_user_by_unique_id`.
-3. Stop with an auth error if the user cannot be resolved.
-4. Pass the authenticated user's database ID to the to-do core operation.
+2. Call the auth kernel's `GetUserSession` operation with that `unique_id`.
+3. The kernel calls Redis `update.set` and obtains the cached permanent `users.id`.
+4. Stop with an unauthorized error if the session is missing or expired.
+5. Pass the authenticated user's database ID to the to-do core operation.
 
-This keeps authentication at the networking boundary and ensures that all to-do operations are scoped to an authenticated user before the core logic runs.
+This keeps authentication and session validation at the networking boundary and ensures that all to-do operations receive a server-resolved user ID before the core logic runs. The normal request path uses the session cache rather than querying the PostgreSQL `users` table for every to-do request.
 
 ### User-scoped operations
 
-The authenticated user's database `id` is the ownership boundary for to-do data. The networking handler obtains it only after the auth kernel has resolved the token's `unique_id`; the handler then passes that `user.id` into the to-do core function. The core forwards the ID to the DAL trait implementation rather than accepting an arbitrary user ID from the request body or URL.
+The authenticated user's database `id` is the ownership boundary for to-do data. The networking handler obtains it only after the auth kernel has resolved the token's `unique_id` through the session cache; the handler then passes that `user.id` into the to-do core function. The core forwards the ID to the DAL trait implementation rather than accepting an arbitrary user ID from the request body or URL.
 
 The DAL uses that ID together with the `user_connections` association when creating and retrieving PostgreSQL-backed items. `SaveOne` records the new `(user_id, to_do_id)` connection, and `GetAll` returns only items connected to the supplied user. The JSON-file descriptor applies the same ownership idea by including the user ID in its storage key.
 
@@ -245,7 +273,7 @@ pub async fn get_user_by_unique_id(
 
 The function has two implementations selected through Cargo features:
 
-Of the three operations provided by `auth-core`, the kernel exposes only the user lookup operation. It is not an auth facade for login or user creation: those operations are exposed by the standalone auth HTTP server and are handled by its auth networking layer. The to-do views call `get_user_by_unique_id` after the JWT extractor has decoded the token's `unique_id`. The kernel resolves `unique_id` to a `User` by querying the `users` table, whose `id` is the internal numeric identity used by the to-do core and DAL.
+Of the three operations provided by `auth-core`, the kernel exposes only the user lookup operation. It is not an auth facade for login or user creation: those operations are exposed by the standalone auth HTTP server and are handled by its auth networking layer. For normal protected requests, the to-do views first pass the JWT extractor's `unique_id` to the kernel's `GetUserSession` operation. That operation looks up the session in Redis and returns the cached permanent `users.id` to the to-do core and DAL. The kernel calls `get_user_by_unique_id` only when Redis reports that the session needs to be refreshed; that lookup can use the `users` table directly or the configured auth HTTP service, depending on the selected feature.
 
 That lookup and ownership flow is:
 
@@ -262,6 +290,84 @@ JWT unique_id
 The resulting `users.id` is passed by the to-do view into the to-do core functions. The to-do DAL uses that ID with `user_connections` to identify which item IDs belong to the authenticated user, allowing the CRUD layer to accept or reject operations according to ownership rather than trusting a user ID supplied by the client.
 
 The kernel's direct path invokes `auth-core`'s `users::get::get_by_unique_id`; its HTTP path invokes the equivalent `/api/v1/users/get` endpoint. Both paths return the same `TrimmedUser`, including the internal `users.id` needed by the to-do views.
+
+The kernel also compiles the `cache-client` workspace and exposes Redis session operations through the `RedisSessionDescriptor`. Its `LoginUserSession` trait delegates to the cache client's `login` function, while its `GetUserSession` trait delegates to the cache client's `update` function. This keeps Redis access behind the same descriptor-and-trait pattern used by the database layers.
+
+The session traits expose these function signatures:
+
+```rust
+pub trait GetUserSession {
+	fn get_user_session(
+		unique_id: String,
+	) -> impl Future<Output = Result<UserSession, NanoServiceError>>;
+}
+
+pub trait LoginUserSession {
+	fn login_user_session(
+		address: &str,
+		user_id: &str,
+		timeout_mins: usize,
+		perm_user_id: i32,
+	) -> impl Future<Output = Result<(), NanoServiceError>>;
+}
+```
+
+`GetUserSession` accepts the JWT `unique_id` and returns a `UserSession` containing the permanent database user ID. `LoginUserSession` stores that association in Redis using the cache address, session identity, timeout in minutes, and permanent user ID.
+
+The kernel's `UserSession` value is the application-level representation of the permanent user ID returned by Redis:
+
+```rust
+pub struct UserSession {
+	pub user_id: i32,
+}
+```
+
+The Redis-backed implementation builds this value by delegating session state management to the cache module:
+
+```rust
+pub async fn get_session_redis(
+	unique_id: String,
+) -> Result<UserSession, NanoServiceError> {
+	let address = std::env::var("CACHE_API_URL").map_err(|error| {
+		NanoServiceError::new(error.to_string(), NanoServiceErrorStatus::BadRequest)
+	})?;
+	let session_status = cache_client::update(&address, &unique_id).await?;
+
+	match session_status {
+		UserSessionStatus::Ok(user_id) => Ok(UserSession { user_id }),
+		UserSessionStatus::Refresh => {
+			let user = get_user_by_unique_id(unique_id.clone()).await?;
+			cache_client::login(&address, &unique_id, 20, user.id).await?;
+			Err(NanoServiceError::new(
+				"Session refreshed; request must be retried".to_string(),
+				NanoServiceErrorStatus::Unknown,
+			))
+		}
+	}
+}
+```
+
+The cache module's internal `UserSession` implementation derives the Redis key as `user_session_<unique_id>`, updates `last_interacted`, and stores `timeout_mins`, `counter`, and `perm_user_id` in the Redis hash. Its timeout check deletes expired keys, increments the interaction counter, and returns `OK`, `TIMEOUT`, or `REFRESH`. The kernel maps a successful `OK` response to the `UserSession { user_id }` value consumed by the to-do views.
+
+The two server integrations use those kernel operations differently:
+
+- The auth Actix server calls `LoginUserSession` after a successful `auth/login`. It stores the JWT `unique_id`, a 20-minute timeout, and the permanent `users.id` in Redis.
+- The to-do Actix server calls `GetUserSession` in its get, create, update, and delete views. It passes the `unique_id` extracted by `HeaderToken` to Redis and receives the permanent `user_id` needed by the to-do core.
+
+When a to-do request reaches the kernel, the key is looked up in Redis first: `cache-client::update` invokes Redis `update.set` with the JWT's `unique_id`. A valid session returns the cached permanent user ID, so the request does not need to query the PostgreSQL `users` table on every operation. `NOT_FOUND` and `TIMEOUT` responses become unauthorized errors. When the cache reports `REFRESH`, the kernel uses its configured direct or HTTP `get_user_by_unique_id` path to retrieve the permanent `users.id`, then calls the cache client's `login` function to reset the Redis session with a 20-minute timeout. The refresh branch currently returns an internal error after renewing the key because it does not issue a second `update.set`; the documented cache-first flow therefore reflects the implementation's current behavior rather than implying that the request continues successfully after refresh.
+
+The request sequence is therefore:
+
+```text
+to-do view
+	-> HeaderToken extracts unique_id
+	-> auth-kernel GetUserSession
+	-> cache-client update
+	-> Redis update.set
+		|-- valid: return cached users.id
+		|-- missing/timeout: return unauthorized
+		`-- refresh threshold: get_user_by_unique_id -> cache-client login -> Redis login.set
+```
 
 ### Descriptor-backed user lookup
 
@@ -325,6 +431,8 @@ This is the **key deployment flexibility of the project**: `auth-kernel` gives t
 
 The server's default feature is `auth-core-postgres`. The two modes are selected at compile time, so the same networking code can be deployed with either an embedded auth implementation or a service boundary.
 
+The session-cache integration is shared by both Actix servers: `auth-actix-server` compiles `auth-kernel` to write sessions during login, and `to-do-actix-server` compiles the same kernel to read/update sessions during protected requests. The cache-client dependency and `RedisSessionDescriptor` keep these integrations consistent. Ingress composes both servers into one binary, so it also includes the kernel-based Redis session flow for its auth and to-do views.
+
 In both cases the to-do server calls the same `get_user_by_unique_id` API, receives the same `TrimmedUser`, and passes the same `user.id` into the to-do core. The feature boundary replaces the auth implementation behind that API; it does not create a second to-do application or require an alternate set of endpoint code.
 
 ## Ingress Workspace
@@ -340,6 +448,22 @@ App::new()
 ```
 
 This means the auth and to-do routes can be assembled into the same server without copying their endpoint implementations. Ingress also runs the auth and to-do migration functions at startup, so the binary owns the complete backend composition.
+
+### Shared kernel feature requirement
+
+Both Actix server crates depend on `auth-kernel`. When they are compiled as separate executables, each deployment can select the kernel implementation appropriate to that process. When both servers are compiled into the same `ingress` binary, they must be compiled with the **same `auth-kernel` feature**.
+
+This requirement prevents Cargo feature and dependency conflicts in the shared ingress dependency graph. The auth server's `auth-kernel` dependency is currently configured with `core-postgres`, and the to-do server's default `auth-core-postgres` feature forwards that same feature to the kernel. Consequently, the current ingress build uses the direct PostgreSQL-backed kernel path for both servers.
+
+The matching configuration is:
+
+```text
+auth-actix-server  -> auth-kernel/core-postgres
+to-do-actix-server -> auth-core-postgres -> auth-kernel/core-postgres
+ingress            -> composes both servers with one kernel feature set
+```
+
+The `auth-http` option remains available when the to-do server is deployed independently and the auth server runs as a separate process. It should not be mixed with the auth server's `core-postgres` kernel configuration when both Actix servers are linked into ingress; changing the ingress deployment mode requires aligning the kernel feature configuration of both server crates first.
 
 The frontend is built into `frontend/public`, and `rust-embed` **embeds those generated assets into the Rust binary at compile time**. Ingress serves the embedded `index.html` and static assets directly through Actix, while API requests are routed to the injected nanoservice views. A catch-all route supports frontend navigation and avoids treating API paths as frontend resources.
 
@@ -364,10 +488,10 @@ This is a **modular monolith** rather than a separate rewrite of the services. T
 - Docker and Docker Compose
 - Node.js and npm for the frontend
 
-Start PostgreSQL:
+Start PostgreSQL and the Redis session cache:
 
 ```sh
-docker compose up -d db
+docker compose up -d db cache
 ```
 
 The development database in `compose.yaml` uses:
@@ -380,10 +504,19 @@ user: username
 password: mysecretpassword
 ```
 
+The Redis session cache uses:
+
+```text
+host: localhost
+port: 6379
+url: redis://127.0.0.1:6379
+```
+
 Set the database URL for commands that use PostgreSQL:
 
 ```sh
 export TO_DO_DB_URL='postgresql://username:mysecretpassword@localhost:5432/to_do'
+export CACHE_API_URL='redis://127.0.0.1:6379'
 ```
 
 ### Combined application via ingress workspace
@@ -423,6 +556,7 @@ This serves `frontend/public` on the default `http://localhost:3000`. The fronte
 Run the independently deployed auth server in another terminal:
 
 ```sh
+CACHE_API_URL='redis://127.0.0.1:6379' \
 cargo run -p auth-actix-server
 ```
 
@@ -430,16 +564,18 @@ Run the to-do server with HTTP auth in a third terminal:
 
 ```sh
 AUTH_API_URL='http://127.0.0.1:8081' \
+CACHE_API_URL='redis://127.0.0.1:6379' \
 cargo run -p to-do-actix-server --no-default-features --features auth-http
 ```
 
-For embedded items auth, run only the to-do server with its default feature:
+For embedded auth, run only the to-do server with its default feature:
 
 ```sh
+CACHE_API_URL='redis://127.0.0.1:6379' \
 cargo run -p to-do-actix-server
 ```
 
-Both PostgreSQL-backed modes require `TO_DO_DB_URL` to be set in the environment used by the process.
+Both PostgreSQL-backed modes require `TO_DO_DB_URL` to be set in the environment used by the process. Auth login and to-do session updates also require `CACHE_API_URL` to point to the Redis container.
 
 The independently deployed arrangement therefore consists of three deployable pieces: the static frontend, the to-do Actix server and the auth Actix server.
 
