@@ -1,6 +1,134 @@
-# Rust nanoservices
+# Rust nanoservices todo app
 
 Full stack to-do application with a modular design implementing Rust workspaces containing an authenticated to-do application. It is organized as two nanoservices, each split into domain logic, data access, and HTTP networking layers. The same auth contract can be used either by compiling auth into the to-do process or by calling a separately deployed auth service over HTTP.
+
+- [Rust nanoservices todo app](#rust-nanoservices-todo-app)
+	- [Running Locally](#running-locally)
+		- [Prerequisites](#prerequisites)
+		- [Combined application via ingress workspace](#combined-application-via-ingress-workspace)
+		- [Independently deployed auth and to-do servers](#independently-deployed-auth-and-to-do-servers)
+	- [Workspace Structure](#workspace-structure)
+	- [Glue Workspace](#glue-workspace)
+	- [User Session Cache](#user-session-cache)
+		- [`cache-module`](#cache-module)
+		- [`cache-client`](#cache-client)
+	- [Layered Architecture](#layered-architecture)
+		- [Core](#core)
+		- [Data access layer (DAL)](#data-access-layer-dal)
+		- [Actix-server networking](#actix-server-networking)
+	- [PostgreSQL Tables and Migrations](#postgresql-tables-and-migrations)
+	- [Auth Nanoservice](#auth-nanoservice)
+		- [Auth core operations](#auth-core-operations)
+	- [To-do Nanoservice](#to-do-nanoservice)
+		- [User-scoped operations](#user-scoped-operations)
+		- [To-do data model](#to-do-data-model)
+		- [To-do functionality](#to-do-functionality)
+	- [Auth Kernel](#auth-kernel)
+		- [feature `core-postgres`](#feature-core-postgres)
+		- [feature `http`](#feature-http)
+	- [Redis Session Cache](#redis-session-cache)
+	- [Ingress Workspace](#ingress-workspace)
+		- [Shared kernel feature requirement](#shared-kernel-feature-requirement)
+	- [Example Requests](#example-requests)
+
+## Running Locally
+
+### Prerequisites
+
+- Rust and Cargo
+- Docker and Docker Compose
+- Node.js and npm for the frontend
+
+Start PostgreSQL and the Redis session cache:
+
+```sh
+docker compose up -d db cache
+```
+
+The development database in `compose.yaml` uses:
+
+```text
+host: localhost
+port: 5432
+database: to_do
+user: username
+password: mysecretpassword
+```
+
+The Redis session cache uses:
+
+```text
+host: localhost
+port: 6379
+url: redis://127.0.0.1:6379
+```
+
+Set the database URL for commands that use PostgreSQL:
+
+```sh
+export TO_DO_DB_URL='postgresql://username:mysecretpassword@localhost:5432/to_do'
+export CACHE_API_URL='redis://127.0.0.1:6379'
+```
+
+### Combined application via ingress workspace
+
+`ingress` runs both auth and to-do APIs in one process + embeds and serves the compiled frontend. Build the frontend first, then run:
+
+```sh
+cd frontend
+npm install
+npm run build
+cd ..
+cargo run -p ingress
+```
+
+The combined application listens on `0.0.0.0:8001` and runs both auth and to-do migrations.
+
+### Independently deployed auth and to-do servers
+
+In this deployment shape, the frontend is built and served separately from the two Rust API processes. The frontend build produces static files in `frontend/public`; it does not need a Rust server to be hosted.
+
+Build the frontend from the repository root:
+
+```sh
+cd frontend
+npm install
+npm run build
+```
+
+For local development, serve the generated frontend in one terminal:
+
+```sh
+npm run serve
+```
+
+This serves `frontend/public` on the default `http://localhost:3000`. The frontend detects that development origin and sends API requests to the to-do server at `http://localhost:8001`. For deployment, publish the contents of `frontend/public` with any static web server or CDN. Configure the frontend's API base URL for the public to-do server origin when the frontend is not running on the local development port.
+
+Run the independently deployed auth server in another terminal:
+
+```sh
+CACHE_API_URL='redis://127.0.0.1:6379' \
+cargo run -p auth-actix-server
+```
+
+Run the to-do server with HTTP auth in a third terminal:
+
+```sh
+AUTH_API_URL='http://127.0.0.1:8081' \
+CACHE_API_URL='redis://127.0.0.1:6379' \
+cargo run -p to-do-actix-server --no-default-features --features auth-http
+```
+
+For embedded auth, run only the to-do server with its default feature:
+
+```sh
+CACHE_API_URL='redis://127.0.0.1:6379' \
+cargo run -p to-do-actix-server
+```
+
+Both PostgreSQL-backed modes require `TO_DO_DB_URL` to be set in the environment used by the process. Auth login and to-do session updates also require `CACHE_API_URL` to point to the Redis container.
+
+The independently deployed arrangement therefore consists of three deployable pieces: the static frontend, the to-do Actix server and the auth Actix server.
 
 ## Workspace Structure
 
@@ -123,7 +251,7 @@ The auth core provides user operations such as creating a user, logging in, and 
 
 The DAL crates define schemas, database connections, migrations, and transaction traits. They also provide concrete descriptor types:
 
-- `auth-dal` currently provides `SqlxPostGresDescriptor` for PostgreSQL-backed users.
+- `auth-dal` currently provides `SqlxPostGresDescriptor` for PostgreSQL operating the `users` database with the traits: `SaveOne` (creates a user), `GetByEmail` and `GetByUniqueId`.
 - `to-do-dal` provides `SqlxPostGresDescriptor` for PostgreSQL and `JsonFileDescriptor` for JSON-file storage.
 
 Each descriptor implements the relevant transaction traits. The core and networking layers therefore depend on capabilities rather than a storage implementation. To add another backend, define a descriptor and implement the existing traits for it. The use-case code can remain unchanged; the networking layer only needs to select that descriptor when registering its routes.
@@ -134,6 +262,12 @@ The to-do DAL exposes these storage features:
 | --- | --- |
 | `json-file` | Enables JSON-file persistence and `serde_json` |
 | `sqlx-postgres` | Enables PostgreSQL persistence, migrations, and `dotenv` |
+
+### Actix-server networking
+
+The networking crates adapt Actix Web requests to core use cases and **choose concrete descriptors at the route boundary**. The standalone auth server registers user creation, user lookup, and login routes. The to-do server registers get, create, delete, and update routes.
+
+The current to-do Actix server selects `to_do_dal::...::SqlxPostGresDescriptor`, so its executable uses PostgreSQL. `JsonFileDescriptor` remains available as an alternative DAL implementation for consumers that wire routes to it.
 
 ## PostgreSQL Tables and Migrations
 
@@ -159,17 +293,11 @@ The PostgreSQL DAL exploits this association as follows:
 - `SaveOne` inserts the item into `to_do_items`, then inserts `(user_id, to_do_id)` into `user_connections` using the newly created item's ID.
 - `GetAll` selects from `to_do_items` only when the item ID appears in a subquery over `user_connections` for the supplied `user_id`.
 - `DeleteOne` uses the supplied user ID when removing the matching row from `user_connections` after deleting the item.
-- `UpdateOne` accepts a user ID at the trait boundary, but the current PostgreSQL SQL update filters only by item ID and does not yet check `user_connections`.
+- `UpdateOne` accepts a user ID at the trait boundary, so the SQL update filters only by item ID on `to_do_items` and does not check `user_connections`.
 
 Consequently, the association currently provides user scoping for creation and retrieval, and maintains the ownership record during deletion. To guarantee that PostgreSQL updates and deletes can never affect another user's item, those item-selection queries must also join or subquery `user_connections` with the authenticated `user_id`; the JSON-file descriptor already incorporates the user ID into its lookup key.
 
 Both the standalone auth server and the standalone to-do server run their own DAL migrations at startup. The combined `ingress` binary runs both migration sets before starting its HTTP server, so a fresh development database can be initialized by the application processes themselves.
-
-### Actix-server networking
-
-The networking crates adapt Actix Web requests to core use cases and choose concrete descriptors at the route boundary. The standalone auth server registers user creation, user lookup, and login routes. The to-do server registers get, create, delete, and update routes.
-
-The current to-do Actix server selects `to_do_dal::...::SqlxPostGresDescriptor`, so its executable uses PostgreSQL. `JsonFileDescriptor` remains available as an alternative DAL implementation for consumers that wire routes to it.
 
 ## Auth Nanoservice
 
@@ -187,7 +315,7 @@ The `auth-core` workspace provides three generic operations. Each operation rece
 
 | Operation | Behavior |
 | --- | --- |
-| `auth/login` | Retrieves a user by email, verifies the supplied password against the stored Argon2 hash, and returns an encoded `HeaderToken` containing the user's `unique_id`. |
+| `auth/login` | **Retrieves a user by email**, verifies the supplied password against the stored Argon2 hash, and returns an encoded `HeaderToken` containing the user's `unique_id`. |
 | `users/create` | Builds a new user, generates its unique ID, hashes the password, and saves the user in the database. |
 | `users/get` | Calls `get_by_unique_id` to retrieve a user and returns the password-free `TrimmedUser` representation. |
 
@@ -263,7 +391,7 @@ The HTTP handlers compose these operations so create, delete, and update can ret
 
 ## Auth Kernel
 
-`auth-kernel` is the integration boundary between authentication and the to-do views. Its purpose is to turn the authenticated identity extracted from the JWT into the internal database user ID required by the to-do application to allow/deny operations on the items. The kernel exposes one stable function:
+`auth-kernel` is the integration boundary between authentication and the to-do views. **Its purpose is to turn the authenticated identity extracted from the JWT into the internal database user ID** required by the to-do application to allow/deny operations on the items. Of the three operations provided by `auth-core`, the **kernel exposes only the user lookup operation**. It is not an auth facade for login or user creation: those operations are exposed by the standalone auth HTTP server and are handled by its auth networking layer. The kernel exposes one stable function:
 
 ```rust
 pub async fn get_user_by_unique_id(
@@ -271,27 +399,53 @@ pub async fn get_user_by_unique_id(
 ) -> Result<TrimmedUser, NanoServiceError>
 ```
 
-The function has two implementations selected through Cargo features:
+The function has **two implementations** selected through Cargo features, both paths return the same `TrimmedUser`. In both cases the to-do server calls the same `get_user_by_unique_id` API, receives the same `TrimmedUser`, and passes the same `user.id` into the to-do core. The feature boundary replaces the auth implementation behind that API; it does not create a second to-do application or require an alternate set of endpoint code.
 
-Of the three operations provided by `auth-core`, the kernel exposes only the user lookup operation. It is not an auth facade for login or user creation: those operations are exposed by the standalone auth HTTP server and are handled by its auth networking layer. For normal protected requests, the to-do views first pass the JWT extractor's `unique_id` to the kernel's `GetUserSession` operation. That operation looks up the session in Redis and returns the cached permanent `users.id` to the to-do core and DAL. The kernel calls `get_user_by_unique_id` only when Redis reports that the session needs to be refreshed; that lookup can use the `users` table directly or the configured auth HTTP service, depending on the selected feature.
+### feature `core-postgres`
 
-That lookup and ownership flow is:
+With `core-postgres`, the kernel enables `auth-core` and calls the auth core directly using `SqlxPostGresDescriptor`. The auth core then uses the auth DAL's PostgreSQL implementation in the same process.
 
 ```text
-JWT unique_id
-	-> auth-kernel
-	-> users.unique_id
-	-> users.id
-	-> user_connections.user_id
-	-> user_connections.to_do_id
-	-> owned to-do items
+to-do HTTP handler
+		-> auth-kernel::get_user_by_unique_id
+		-> auth-core::get_by_unique_id<SqlxPostGresDescriptor>
+		-> auth-dal PostgreSQL transaction
 ```
 
-The resulting `users.id` is passed by the to-do view into the to-do core functions. The to-do DAL uses that ID with `user_connections` to identify which item IDs belong to the authenticated user, allowing the CRUD layer to accept or reject operations according to ownership rather than trusting a user ID supplied by the client.
+This is the default mode of `to-do-actix-server` through its `auth-core-postgres` feature.
 
-The kernel's direct path invokes `auth-core`'s `users::get::get_by_unique_id`; its HTTP path invokes the equivalent `/api/v1/users/get` endpoint. Both paths return the same `TrimmedUser`, including the internal `users.id` needed by the to-do views.
+### feature `http`
 
-The kernel also compiles the `cache-client` workspace and exposes Redis session operations through the `RedisSessionDescriptor`. Its `LoginUserSession` trait delegates to the cache client's `login` function, while its `GetUserSession` trait delegates to the cache client's `update` function. This keeps Redis access behind the same descriptor-and-trait pattern used by the database layers.
+With `http`, the kernel enables `reqwest` and `dotenv`, reads `AUTH_API_URL`, and sends a request to:
+
+```text
+{AUTH_API_URL}/api/v1/users/get
+```
+
+It forwards the user identity in the `token` header, calls the independently deployed auth server, and deserializes its `TrimmedUser` response.
+
+```text
+to-do HTTP handler
+		-> auth-kernel::get_user_by_unique_id
+		-> HTTP GET to AUTH_API_URL
+		-> standalone auth Actix server
+		-> auth-core -> auth-dal PostgreSQL transaction
+```
+
+The kernel preserves the same function signature in both modes. The to-do core and its handlers do not need to know whether auth is local or remote.
+
+In `http` mode, the kernel's own process does not use an auth database descriptor. It creates a `HeaderToken` from the supplied identity and calls the auth server's `/api/v1/users/get` endpoint. The standalone auth server then follows the descriptor-backed path above: its Actix handler invokes auth core with `SqlxPostGresDescriptor`, and that descriptor queries the `users` table. Thus the database lookup remains owned by the auth DAL in either deployment; only the process boundary changes.
+
+This is the **key deployment flexibility of the project**: `auth-kernel` gives the to-do server **two interchangeable auth deployments without changing any lines in the to-do server's handlers, core calls, or authorization flow**. Only the Cargo feature selected for the build changes:
+
+| To-do server command feature | Enables | Behavior |
+| --- | --- | --- |
+| `auth-core-postgres` | `auth-kernel/core-postgres` | Compile the auth core and its PostgreSQL DAL into the to-do server and perform the lookup directly |
+| `auth-http` | `auth-kernel/http` | compile the HTTP client path and call an independently deployed auth microservice over HTTP |
+
+## Redis Session Cache
+
+The **kernel** also compiles the `cache-client` workspace to provide session cache to auth `/login` and the todo routes. IT exposes Redis session operations through the `RedisSessionDescriptor`. Its `LoginUserSession` trait delegates to the cache client's `login` function, while its `GetUserSession` trait delegates to the cache client's `update` function. This keeps Redis access behind the same descriptor-and-trait pattern used by the database layers.
 
 The session traits expose these function signatures:
 
@@ -356,7 +510,7 @@ The two server integrations use those kernel operations differently:
 
 When a to-do request reaches the kernel, the key is looked up in Redis first: `cache-client::update` invokes Redis `update.set` with the JWT's `unique_id`. A valid session returns the cached permanent user ID, so the request does not need to query the PostgreSQL `users` table on every operation. `NOT_FOUND` and `TIMEOUT` responses become unauthorized errors. When the cache reports `REFRESH`, the kernel uses its configured direct or HTTP `get_user_by_unique_id` path to retrieve the permanent `users.id`, then calls the cache client's `login` function to reset the Redis session with a 20-minute timeout. The refresh branch currently returns an internal error after renewing the key because it does not issue a second `update.set`; the documented cache-first flow therefore reflects the implementation's current behavior rather than implying that the request continues successfully after refresh.
 
-The request sequence is therefore:
+The to-do request sequence is therefore:
 
 ```text
 to-do view
@@ -369,71 +523,7 @@ to-do view
 		`-- refresh threshold: get_user_by_unique_id -> cache-client login -> Redis login.set
 ```
 
-### Descriptor-backed user lookup
-
-In the direct database deployment, the kernel does not contain SQL or access the database pool itself. Instead, it selects the auth DAL descriptor and passes it to the generic auth-core function:
-
-```rust
-get_by_unique_id_core::<SqlxPostGresDescriptor>(id).await?
-```
-
-The lookup proceeds through the layers as follows:
-
-1. `auth-kernel` receives the `unique_id` from the authenticated to-do request and selects `SqlxPostGresDescriptor`.
-2. `auth-core::api::users::get::get_by_unique_id` is generic over the `GetByUniqueId` trait, so it can work with any descriptor implementing that capability.
-3. The `GetByUniqueId` implementation for `SqlxPostGresDescriptor` delegates to the auth DAL's PostgreSQL function.
-4. The DAL executes `SELECT * FROM users WHERE unique_id = $1` using its shared SQLx PostgreSQL connection pool.
-5. The resulting `User` is converted into `TrimmedUser`, which omits the password hash, and the result is returned through the kernel.
-
-If no matching row exists, the DAL returns a `NotFound` `NanoServiceError`. Database failures are converted into the same shared error type, allowing the networking layer to produce the corresponding HTTP response without coupling the to-do server to SQLx details.
-
-### `core-postgres`
-
-With `core-postgres`, the kernel enables `auth-core` and calls the auth core directly using `SqlxPostGresDescriptor`. The auth core then uses the auth DAL's PostgreSQL implementation in the same process.
-
-```text
-to-do HTTP handler
-		-> auth-kernel::get_user_by_unique_id
-		-> auth-core::get_by_unique_id<SqlxPostGresDescriptor>
-		-> auth-dal PostgreSQL transaction
-```
-
-This is the default mode of `to-do-actix-server` through its `auth-core-postgres` feature.
-
-### `http`
-
-With `http`, the kernel enables `reqwest` and `dotenv`, reads `AUTH_API_URL`, and sends a request to:
-
-```text
-{AUTH_API_URL}/api/v1/users/get
-```
-
-It forwards the user identity in the `token` header, calls the independently deployed auth server, and deserializes its `TrimmedUser` response.
-
-```text
-to-do HTTP handler
-		-> auth-kernel::get_user_by_unique_id
-		-> HTTP GET to AUTH_API_URL
-		-> standalone auth Actix server
-		-> auth-core -> auth-dal PostgreSQL transaction
-```
-
-The kernel preserves the same function signature in both modes. The to-do core and its handlers do not need to know whether auth is local or remote.
-
-In `http` mode, the kernel's own process does not use an auth database descriptor. It creates a `HeaderToken` from the supplied identity and calls the auth server's `/api/v1/users/get` endpoint. The standalone auth server then follows the descriptor-backed path above: its Actix handler invokes auth core with `SqlxPostGresDescriptor`, and that descriptor queries the `users` table. Thus the database lookup remains owned by the auth DAL in either deployment; only the process boundary changes.
-
-This is the **key deployment flexibility of the project**: `auth-kernel` gives the to-do server **two interchangeable auth deployments without changing any lines in the to-do server's handlers, core calls, or authorization flow**. Only the Cargo feature selected for the build changes:
-
-| To-do server command feature | Enables | Behavior |
-| --- | --- | --- |
-| `auth-core-postgres` | `auth-kernel/core-postgres` | Compile the auth core and its PostgreSQL DAL into the to-do server and perform the lookup directly |
-| `auth-http` | `auth-kernel/http` | compile the HTTP client path and call an independently deployed auth microservice over HTTP |
-
-The server's default feature is `auth-core-postgres`. The two modes are selected at compile time, so the same networking code can be deployed with either an embedded auth implementation or a service boundary.
-
-The session-cache integration is shared by both Actix servers: `auth-actix-server` compiles `auth-kernel` to write sessions during login, and `to-do-actix-server` compiles the same kernel to read/update sessions during protected requests. The cache-client dependency and `RedisSessionDescriptor` keep these integrations consistent. Ingress composes both servers into one binary, so it also includes the kernel-based Redis session flow for its auth and to-do views.
-
-In both cases the to-do server calls the same `get_user_by_unique_id` API, receives the same `TrimmedUser`, and passes the same `user.id` into the to-do core. The feature boundary replaces the auth implementation behind that API; it does not create a second to-do application or require an alternate set of endpoint code.
+The **session-cache integration is shared by both Actix servers**: `auth-actix-server` compiles `auth-kernel` to `set` sessions during login, and `to-do-actix-server` compiles the same kernel to `update` and `re-login` sessions during protected requests. The cache-client dependency and `RedisSessionDescriptor` keep these integrations consistent.
 
 ## Ingress Workspace
 
@@ -453,7 +543,7 @@ This means the auth and to-do routes can be assembled into the same server witho
 
 Both Actix server crates depend on `auth-kernel`. When they are compiled as separate executables, each deployment can select the kernel implementation appropriate to that process. When both servers are compiled into the same `ingress` binary, they must be compiled with the **same `auth-kernel` feature**.
 
-This requirement prevents Cargo feature and dependency conflicts in the shared ingress dependency graph. The auth server's `auth-kernel` dependency is currently configured with `core-postgres`, and the to-do server's default `auth-core-postgres` feature forwards that same feature to the kernel. Consequently, the current ingress build uses the direct PostgreSQL-backed kernel path for both servers.
+This requirement prevents Cargo feature and dependency conflicts in the shared ingress dependency graph. The auth server's `auth-kernel` dependency is currently configured with `core-postgres`, and the to-do server's default `auth-core-postgres` feature forwards that same feature to the kernel. Consequently, the current ingress build uses the direct PostgreSQL-backed kernel path for both servers. But could be swapped by `http`.
 
 The matching configuration is:
 
@@ -479,105 +569,6 @@ single Rust process
 ```
 
 This is a **modular monolith** rather than a separate rewrite of the services. The same nanoservice views used by independently deployed servers are injected into ingress, allowing the deployment shape to change from independently deployed auth/to-do microservices to a **single frontend-plus-backend Rust binary** without changing the core use cases.
-
-## Running Locally
-
-### Prerequisites
-
-- Rust and Cargo
-- Docker and Docker Compose
-- Node.js and npm for the frontend
-
-Start PostgreSQL and the Redis session cache:
-
-```sh
-docker compose up -d db cache
-```
-
-The development database in `compose.yaml` uses:
-
-```text
-host: localhost
-port: 5432
-database: to_do
-user: username
-password: mysecretpassword
-```
-
-The Redis session cache uses:
-
-```text
-host: localhost
-port: 6379
-url: redis://127.0.0.1:6379
-```
-
-Set the database URL for commands that use PostgreSQL:
-
-```sh
-export TO_DO_DB_URL='postgresql://username:mysecretpassword@localhost:5432/to_do'
-export CACHE_API_URL='redis://127.0.0.1:6379'
-```
-
-### Combined application via ingress workspace
-
-`ingress` runs both auth and to-do APIs in one process + embeds and serves the compiled frontend. Build the frontend first, then run:
-
-```sh
-cd frontend
-npm install
-npm run build
-cd ..
-cargo run -p ingress
-```
-
-The combined application listens on `0.0.0.0:8001` and runs both auth and to-do migrations.
-
-### Independently deployed auth and to-do servers
-
-In this deployment shape, the frontend is built and served separately from the two Rust API processes. The frontend build produces static files in `frontend/public`; it does not need a Rust server to be hosted.
-
-Build the frontend from the repository root:
-
-```sh
-cd frontend
-npm install
-npm run build
-```
-
-For local development, serve the generated frontend in one terminal:
-
-```sh
-npm run serve
-```
-
-This serves `frontend/public` on the default `http://localhost:3000`. The frontend detects that development origin and sends API requests to the to-do server at `http://localhost:8001`. For deployment, publish the contents of `frontend/public` with any static web server or CDN. Configure the frontend's API base URL for the public to-do server origin when the frontend is not running on the local development port.
-
-Run the independently deployed auth server in another terminal:
-
-```sh
-CACHE_API_URL='redis://127.0.0.1:6379' \
-cargo run -p auth-actix-server
-```
-
-Run the to-do server with HTTP auth in a third terminal:
-
-```sh
-AUTH_API_URL='http://127.0.0.1:8081' \
-CACHE_API_URL='redis://127.0.0.1:6379' \
-cargo run -p to-do-actix-server --no-default-features --features auth-http
-```
-
-For embedded auth, run only the to-do server with its default feature:
-
-```sh
-CACHE_API_URL='redis://127.0.0.1:6379' \
-cargo run -p to-do-actix-server
-```
-
-Both PostgreSQL-backed modes require `TO_DO_DB_URL` to be set in the environment used by the process. Auth login and to-do session updates also require `CACHE_API_URL` to point to the Redis container.
-
-The independently deployed arrangement therefore consists of three deployable pieces: the static frontend, the to-do Actix server and the auth Actix server.
 
 ## Example Requests
 
@@ -636,5 +627,3 @@ Delete a to-do item by its title:
 curl -X DELETE http://127.0.0.1:8001/api/v1/delete/code-review \
 	-H 'token: <JWT>'
 ```
-
-When `auth-http` is enabled, the token is received by the to-do server and the kernel performs the user lookup against `AUTH_API_URL`. When auth is embedded, the same request is resolved through the compiled auth core and DAL instead.
