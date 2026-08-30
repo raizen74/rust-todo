@@ -8,11 +8,13 @@ tokio = { version = "1.36.0", features = ["full"] }
 actix-web = "4.9.0"
 actix-cors = "0.7.0"
 to-do-core = { path = "../../core" }
-to-do-dal = { path = "../../dal", features = ["sqlx-postgres"] }
+to-do-dal = { path = "../../dal" }
 glue = { path = "../../../../glue", features = ["actix"] }
 auth-kernel = { path = "../../../auth/kernel" }
 
 [features]
 auth-http = ["auth-kernel/http"] # if we activate this feat, then we will interact with the auth server via HTTP (auth server must be listening)
 auth-core-postgres = ["auth-kernel/core-postgres"] # compiles the auth server into the to-do server and call the auth functions directly
-default = ["auth-core-postgres"]
+dal-json = ["to-do-dal/json-file"]
+dal-postgres = ["to-do-dal/sqlx-postgres"]
+default = ["auth-core-postgres", "dal-postgres"]
