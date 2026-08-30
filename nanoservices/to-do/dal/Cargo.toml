@@ -2,19 +2,16 @@
 name = "to-do-dal"
 version = "0.1.0"
 edition = "2024"
-# json-file feature declares that it needs both of our serde dependencies
-# if the library is compiled with the json-file feature. This gives us fine-grained control over what is
-# compiled.
-[features]
-json-file = ["serde_json"]
-sqlx-postgres = ["sqlx", "dotenv"]
 
 [dependencies]
 serde ={ version="1.0.197", features = ["derive"] }
 glue = { path = "../../../glue"}
 # for json-file
 serde_json ={ version="1.0.114", optional = true }
-
 # for sqlx-postgres
 sqlx = { version = "0.8.3", features = ["runtime-tokio-rustls", "tls-rustls", "migrate", "postgres", "json"], optional = true }
 dotenv = { version = "0.15", optional = true }
+
+[features]
+json-file = ["serde_json"]
+sqlx-postgres = ["sqlx", "dotenv"]
